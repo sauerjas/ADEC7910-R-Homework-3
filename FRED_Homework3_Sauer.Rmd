@@ -1,0 +1,403 @@
+---
+title: "R Homework 3: FRED Activity"
+subtitle: "ADAN/ADEC 7910 Software Tools"
+author: "Jason F. Sauer"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 8, fig.height = 4.5)
+```
+
+## Background
+
+The St. Louis branch of the Federal Reserve System maintains an extensive
+database of U.S. economic data that is available to the public.
+Economists, businesses, and financial institutions rely on the Federal
+Reserve Economic Data (FRED) database to guide their organizations'
+behaviors.
+
+## Objective
+
+In this activity we use the fredr package to pull FRED data directly
+into R, then use tidyverse and ggplot2 to analyze and visualize it. The
+goal is to understand how the federal funds rate (FFR), long-term
+Treasury yields, inflation, unemployment, and the business cycle relate
+to one another and to the primary mortgage market.
+
+## Connecting to FRED in RStudio
+
+The fredr, tidyverse, and lubridate packages are loaded and the FRED API
+key is set in chunks hidden from this report (`include = FALSE`), so the
+key is not published.
+
+```{r packages, include = FALSE}
+library(tidyverse)
+library(lubridate)
+library(fredr)
+library(ggplot2)
+```
+
+```{r api_key, include = FALSE}
+fredr_set_key("479b16811497819c8a48b976ed38a94e")
+```
+
+### Analysis window
+
+Every plot covers the same rolling 20-year window, ending at the date
+the document is knit.
+
+```{r dates}
+end_date   <- Sys.Date()
+start_date <- floor_date(end_date %m-% years(20), unit = "month")
+
+start_date
+end_date
+```
+
+### Helper functions
+
+Two user-defined functions keep the code for tasks 1-4 short and
+consistent. `get_series()` downloads one FRED series and tags it with a
+readable label; `plot_series()` draws a formatted line chart.
+
+```{r helpers}
+get_series <- function(series_id, label, ...) {
+  fredr( series_id = series_id, observation_start = start_date, observation_end = end_date,
+    ...) %>%
+    select(date, value) %>%
+    filter(!is.na(value)) %>%
+    mutate(series = label)
+}
+
+plot_series <- function(df, title, y_label, colors) {
+  ggplot(df, aes(x = date, y = value, color = series)) + geom_line(linewidth = 0.8) +
+    scale_color_manual(values = colors) + scale_x_date(date_breaks = "2 years", date_labels = "%Y") + labs(title = title, x = "Observation Date", y = y_label, color = "Series", caption = "Source: FRED, Federal Reserve Bank of St. Louis") + theme_minimal(base_size = 11) + theme(plot.title = element_text(hjust = 0.5, face = "bold"),legend.position = "bottom")
+}
+```
+
+## Search for Data
+
+```{r search}
+popular_funds_series <- fredr_series_search_text( search_text = "federal funds", order_by    = "popularity", sort_order = "desc", limit = 5)
+
+string_of_results <- paste(popular_funds_series$id, collapse = ", ")
+print(paste("The top series id are:", string_of_results))
+```
+
+The series used in this report are:
+
+| Task | Measure                            | FRED Series ID | Frequency                       |
+|------|------------------------------------|----------------|---------------------------------|
+| 1    | Effective federal funds rate       | FEDFUNDS       | Monthly                         |
+| 2    | 10-year Treasury constant maturity | GS10           | Monthly                         |
+| 3    | CPI, all items (headline)          | CPIAUCSL       | Monthly, % change from year ago |
+| 3    | CPI less food and energy (core)    | CPILFESL       | Monthly, % change from year ago |
+| 4    | Civilian unemployment rate         | UNRATE         | Monthly                         |
+| 5    | NBER recession indicator           | USREC          | Monthly (1 = recession)         |
+| 6    | 30-year fixed mortgage average     | MORTGAGE30US   | Weekly, averaged to monthly     |
+## Analysis Tasks
+
+You are a financial analyst at a bank that sells mortgages on the
+primary market. Your manager wants to understand how historical data can
+serve as an indicator of the federal funds rate (FFR). The FFR is one of
+several factors that drive the prime rate for home mortgages. Tasks 1-6
+below plot the FFR, the 10-year Treasury rate, inflation, unemployment,
+and U.S. recessions over the past 20 years, then combine them into a
+single money-plot used to analyze the mortgage market and forecast the
+FFR.
+
+## Task 1: Federal Funds Rate, Past 20 Years
+
+```{r task1}
+# Save the #1 search result's series ID, as in the template ("FEDFUNDS")
+popular_funds_series_id <- popular_funds_series$id[1]
+
+# Template pipe example, with dates updated to the past 20 years
+popular_funds_series_id %>%
+  fredr( observation_start = start_date, observation_end = end_date) %>%
+  ggplot(data = ., mapping = aes(x = date, y = value, color = series_id)) + geom_line(linewidth = 0.8) + labs(x = "Observation Date", y = "Rate (%)", color = "Series",
+caption = "Source: FRED, Federal Reserve Bank of St. Louis") + ggtitle("Federal Funds Rate\n(Effective)") + theme_minimal(base_size = 11) + theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "bottom")
+
+# Save the same series for the money-plot in Task 6
+FFR_data <- get_series(popular_funds_series_id, "Effective Fed Funds Rate")
+```
+
+The FFR shows three distinct regimes: a pre-crisis peak above 5% in
+2006-07, more than a decade pinned near zero after the 2008 financial
+crisis (with a brief, modest hiking cycle in 2016-18), and the
+aggressive 2022-23 tightening cycle that took the rate back above 5%
+before cuts resumed in late 2024 and 2025.
+
+## Task 2: 10-Year Treasury Rate, Past 20 Years
+
+```{r task2}
+T10_data <- get_series("GS10", "10-Year Treasury")
+
+plot_series(T10_data, title = "10-Year Treasury Constant Maturity Rate", y_label = "Yield (%)", colors  = c("10-Year Treasury" = "#2e7d32"))
+```
+
+The 10-year yield is set by the bond market rather than the Fed. It
+reflects expected future short rates, expected inflation, and a term
+premium. It moved far less than the FFR during the zero-rate years and
+reached its low in 2020 before rising sharply alongside inflation.
+
+## Task 3: Inflation Rate, Past 20 Years
+
+Inflation is measured as the percent change in the Consumer Price Index
+from one year earlier. Core CPI removes volatile food and energy prices
+and is a better gauge of underlying trend.
+
+```{r task3}
+CPI_data <- bind_rows( get_series("CPIAUCSL", "Headline CPI", units = "pc1"), get_series("CPILFESL", "Core CPI", units = "pc1"))
+
+plot_series(CPI_data, title = "Inflation Rate (CPI, Year-over-Year % Change)", y_label = "Inflation (%)", colors  = c("Headline CPI" = "#c62828", "Core CPI" = "#ef9a9a")) +  geom_hline(yintercept = 2, linetype = "dashed", color = "grey40") + annotate("text",x = as.Date("2024-01-01"), y = 1.4, label = "Fed 2% target", size = 3, color = "grey30", hjust = 0)
+```
+
+Headline inflation briefly turned negative in 2009 as energy prices
+collapsed, ran close to the 2% target for most of the 2010s, then surged
+to roughly 9% in mid-2022, the highest in four decades. It has since
+come down but has not returned to target.
+
+## Task 4: Unemployment Rate, Past 20 Years
+
+```{r task4}
+UNRATE_data <- get_series("UNRATE", "Unemployment Rate")
+
+plot_series(UNRATE_data, title = "Civilian Unemployment Rate", y_label = "Unemployment (%)",  colors  = c("Unemployment Rate" = "#6a1b9a"))
+```
+
+Unemployment peaked near 10% after the Great Recession and took most of
+a decade to recover. The 2020 pandemic spike to about 15% was the
+sharpest in the post-war record but also the fastest recovery.
+
+## Task 5: Timeline of U.S. Recessions, Past 20 Years
+
+FRED's `USREC` series equals 1 in months the National Bureau of Economic
+Research (NBER) classifies as recessionary. The code below turns that
+monthly 0/1 series into start and end dates for each recession.
+
+```{r task5}
+USREC_data <- get_series("USREC", "Recession")
+
+# Number each run of 0s and 1s, keep the 1s, and find each recession's dates
+recessions <- USREC_data %>%
+  mutate(spell = cumsum(value != lag(value, default = 0))) %>%
+  filter(value == 1) %>%
+  group_by(spell) %>%
+  summarise(start = min(date), end = max(date) %m+% months(1))
+
+knitr::kable(
+  recessions %>%
+    transmute(`Recession start` = format(start, "%b %Y"), `Recession end` = format(end - 1, "%b %Y")), caption = "NBER-dated U.S. recessions in the analysis window")
+
+ggplot(USREC_data, aes(x = date, y = value, fill = series)) + geom_col(width = 31) + scale_fill_manual(values = c("Recession" = "grey40")) + scale_y_continuous(breaks = c(0, 1), labels = c("Expansion", "Recession")) + scale_x_date(date_breaks = "2 years", date_labels = "%Y") + labs(title = "Timeline of U.S. Recessions (NBER)", x = "Observation Date", y = NULL, fill = NULL, caption = "Source: FRED series USREC") + theme_minimal(base_size = 11) +   theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "bottom")
+```
+
+The window contains two recessions: the Great Recession (December 2007
+peak to June 2009 trough, about 18 months) and the very short COVID-19
+recession (February 2020 peak to April 2020 trough). In both cases the
+Fed cut the FFR to near zero, and in both cases unemployment rose
+sharply.
+
+## Task 6: The Money-Plot
+
+### Additional data: the 30-year mortgage rate
+
+Because the manager's question is about the mortgage market, the
+money-plot adds Freddie Mac's 30-year fixed mortgage average. FRED
+publishes it weekly, so we ask FRED to average it to monthly to match
+the other series.
+
+```{r mortgage}
+MORT_data <- get_series("MORTGAGE30US", "30-Year Mortgage", frequency = "m", aggregation_method = "avg")
+```
+
+### Building the money-plot
+
+The money-plot is built in labeled steps. Each step adds one layer to
+the plot object, and the final line displays the finished chart.
+
+```{r moneyplot, fig.width = 9, fig.height = 5.5}
+# Combine the five series into one data set for plotting
+money_df <- bind_rows( 
+  FFR_data    %>% mutate(series = "Fed Funds Rate"),
+  T10_data    %>% mutate(series = "10-Year Treasury"),
+  MORT_data   %>% mutate(series = "30-Year Mortgage"),
+  CPI_data    %>% filter(series == "Headline CPI") %>%
+                  mutate(series = "CPI Inflation (YoY)"),
+  UNRATE_data %>% mutate(series = "Unemployment Rate")) %>%
+  mutate(series = factor(series, levels = c("30-Year Mortgage", "10-Year Treasury", "Fed Funds Rate", "CPI Inflation (YoY)", "Unemployment Rate")))
+
+# Color and line style for each series
+money_colors <- c("30-Year Mortgage" = "#e65100", "10-Year Treasury" = "#2e7d32", "Fed Funds Rate" = "#1f4e79", "CPI Inflation (YoY)" = "#c62828", "Unemployment Rate" = "#6a1b9a") 
+
+money_lines <- c("30-Year Mortgage" = "solid", "10-Year Treasury" = "solid", "Fed Funds Rate" = "solid", "CPI Inflation (YoY)" = "dashed", "Unemployment Rate" = "dotted")
+
+# Step A: Pipe the data into ggplot and map the columns
+money_plot <- money_df %>%
+  ggplot(aes(x = date, y = value, color = series, linetype = series))
+
+# Step B: Shade the recessions in the background
+money_plot <- money_plot + geom_rect(data = recessions, inherit.aes = FALSE, aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = "NBER recession"), alpha = 0.35)
+
+# Step C: Add a zero reference line and the five data lines
+money_plot <- money_plot + geom_hline(yintercept = 0, color = "grey60", linewidth = 0.3) +  geom_line(linewidth = 0.85)
+
+# Step D: Set the colors, line styles, and recession shading color
+money_plot <- money_plot + scale_color_manual(values = money_colors) + scale_linetype_manual(values = money_lines) + scale_fill_manual(values = c("NBER recession" = "grey75"))
+
+# Step E: Format the date and percent axes
+money_plot <- money_plot + scale_x_date(date_breaks = "2 years", date_labels = "%Y") + scale_y_continuous(breaks = seq(-2, 16, 2))
+
+# Step F: Add the title, subtitle, axis labels, and source caption
+plot_subtitle <- paste("Monthly data,", format(start_date, "%b %Y"), "to", format(max(money_df$date), "%b %Y"))
+
+money_plot <- money_plot + labs(title    = "The Money-Plot: Policy Rates, Market Rates, and the Business Cycle",
+       subtitle = plot_subtitle,
+       x        = "Observation Date",
+       y        = "Percent",
+       color    = NULL,
+       linetype = NULL,
+       fill     = NULL,
+       caption  = "Sources: FRED (FEDFUNDS, GS10, MORTGAGE30US, CPIAUCSL, UNRATE, USREC)")
+
+# Step G: Arrange the legend and apply the theme
+money_plot <- money_plot + guides(color = guide_legend(nrow = 2), linetype = guide_legend(nrow = 2)) +  theme_minimal(base_size = 11) + theme(plot.title = element_text(hjust = 0.5, face = "bold"),  plot.subtitle = element_text(hjust = 0.5), legend.position = "bottom")
+
+# Step H: Display the finished plot
+money_plot
+```
+
+### Supporting numbers
+
+```{r money_stats}
+# Put each series in its own column, keeping months where all five exist
+wide <- money_df %>%
+  select(date, series, value) %>%
+  pivot_wider(names_from = series, values_from = value) %>%
+  drop_na()
+
+cor_mort_10y  <- cor(wide$`30-Year Mortgage`, wide$`10-Year Treasury`)
+cor_mort_ffr  <- cor(wide$`30-Year Mortgage`, wide$`Fed Funds Rate`)
+spread        <- wide$`30-Year Mortgage` - wide$`10-Year Treasury`
+avg_spread    <- mean(spread)
+latest_spread <- last(spread)
+
+knitr::kable(tibble(Measure = c("Correlation: mortgage rate vs. 10-year Treasury",  "Correlation: mortgage rate vs. fed funds rate", "Average mortgage minus 10-year spread (pct. points)",   "Latest mortgage minus 10-year spread (pct. points)"), Value = round(c(cor_mort_10y, cor_mort_ffr, avg_spread, latest_spread), 2)), caption = "How closely mortgage rates track each benchmark")
+
+money_df %>%
+  group_by(series) %>%
+  slice_max(date, n = 1) %>%
+  ungroup() %>%
+  transmute(Series = series, `Latest month` = format(date, "%b %Y"), `Value (%)` = value) %>%
+  knitr::kable(digits = 2, caption = "Most recent observation for each series")
+```
+
+### Why the money-plot is built this way
+
+The plot puts every series on one shared percent axis so that the
+reader can compare levels directly: how far the mortgage rate sits above
+the 10-year Treasury, whether the policy rate is above or below
+inflation, and where unemployment is relative to its history. The
+30-year mortgage rate is added because it is the price our bank actually
+sells, so the question "what drives it?" should be answerable from the
+picture. Recessions are shaded in the background rather than drawn as a
+line, so they frame the story without competing with the rates. Market
+and policy rates are drawn as solid lines, while the two macro
+indicators the Fed reacts to (inflation and unemployment) are dashed
+and dotted, which separates "what the Fed watches" from "what borrowers
+pay." Unemployment and inflation are kept on the same axis instead of a
+second axis, because dual axes make it easy to imply relationships that
+are only an artifact of scaling.
+
+### Analysis of the mortgage market
+
+**The Fed sets the short end; the bond market sets mortgage rates.** The
+30-year mortgage rate moves almost in lockstep with the 10-year
+Treasury (correlation of `r round(cor_mort_10y, 2)`), and much less
+tightly with the FFR (`r round(cor_mort_ffr, 2)`). Mortgages are priced
+off long-term yields because most 30-year loans are refinanced or paid
+off in roughly a decade and are funded through mortgage-backed
+securities that compete with Treasuries for investors. Over the window
+the mortgage rate averaged about `r round(avg_spread, 2)` percentage
+points above the 10-year yield; the latest spread is
+`r round(latest_spread, 2)` points.
+
+**The FFR still matters, through expectations.** The FFR influences the
+10-year yield through expected future short rates, and the plot shows
+this clearly in the 2022-23 cycle: as the Fed raised the FFR from near
+zero to above 5%, the 10-year and the mortgage rate roughly doubled to
+their highest levels in two decades. The reverse case is just as
+instructive. The Fed cut the FFR by 1.75 percentage points between
+September 2024 and December 2025, yet mortgage rates barely fell,
+because long-term yields stayed high on persistent inflation and
+heavy Treasury issuance. Cutting the FFR does not guarantee cheaper
+mortgages.
+
+**Recessions are when the FFR falls fastest.** In both shaded periods
+the Fed cut aggressively as unemployment rose, and mortgage rates
+eventually followed long yields down, which set off refinancing booms
+in 2009-12 and 2020-21. Rising unemployment is the most reliable
+historical signal that the FFR is about to fall.
+
+**Real rates explain the Fed's stance.** When CPI inflation is above the
+FFR (most of 2021-22), policy is loose; when the FFR is above inflation
+(2023-24), policy is restrictive. Today the two lines sit close
+together, which means policy is only mildly restrictive in real terms,
+and the Fed has responded to the recent re-acceleration in inflation by
+leaning toward tighter policy rather than looser.
+
+### Where things stand (October 2026)
+
+The latest data paint a stagflation-tinged picture. Headline CPI
+inflation rose to 3.7% year-over-year in September 2026, up from 3.4%
+the month before and well above the 2% target. At the same time, the
+labor market is cooling: payrolls grew by only about 29,000 in
+September and unemployment rose to 4.2%. Despite the soft jobs data,
+the FOMC raised the target range by 25 basis points to 3.75%-4.00% on
+September 16, 2026, its first hike since July 2023, and the
+accompanying projections signaled roughly one more increase before
+year-end. In the bond market, the 10-year yield climbed above 5%, its
+highest level since 2007, and Freddie Mac's 30-year mortgage average
+reached 7.40% in mid-October, up from about 6.3% a year earlier.
+
+### Prediction: the FFR and the mortgage market
+
+It is not possible to know the future, but the plotted history supports
+a reasoned base case.
+
+*Federal funds rate.* The Fed is fighting rising inflation while the
+labor market softens, a conflict between its two mandates. Historically
+the Fed has prioritized inflation once it runs well above target (as in
+2022-23), so the base case is one more 25 basis point hike by December
+2026, taking the target range to 4.00%-4.25%, followed by a hold through
+at least the first half of 2027. Rate cuts become likely only if either
+inflation clearly turns down or unemployment rises meaningfully further.
+The money-plot shows that once unemployment starts climbing quickly, the
+Fed has historically reversed course within months, so a rise toward 5%
+unemployment is the main risk to this forecast and would pull cuts
+forward into 2027.
+
+*Mortgage rates.* Because mortgage rates track the 10-year Treasury, the
+near-term outlook depends on long yields, not the Fed's next move. With
+inflation re-accelerating and the 10-year above 5%, the best estimate is
+that the 30-year rate stays in roughly a 6.75%-7.75% range over the next
+six to twelve months. A meaningful decline below 6.5% would most likely
+require a growth scare or recession that pushes investors into
+Treasuries.
+
+*Implications for the bank.* Expect weak refinance volume, since most
+existing borrowers hold rates well below today's market and have no
+incentive to refinance (the "lock-in" effect). Purchase volume should
+also stay subdued, because high rates on top of high home prices strain
+affordability. Adjustable-rate and buydown products are likely to gain
+share as borrowers look for lower initial payments. The bank should be
+positioned to capture a refinancing wave quickly if a recession pushes
+long rates down, as happened after each shaded period on the
+money-plot, while managing rate-lock pipeline risk carefully in the
+meantime given how volatile the 10-year has been.
